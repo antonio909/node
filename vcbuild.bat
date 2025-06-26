@@ -289,3 +289,100 @@ echo Found MSVS version %VisualStudioVersion%
 set GYP_MSVS_VERSION=2022
 set PLATFORM_TOOLSET=v143
 goto msbuild-found
+
+:msbuild-not-found
+set "clang_echo="
+if defined clang_cl set "clang_echo= or Clang compiler/LLVM toolset"
+echo Failed to find a suitable Visual Studio installation%clang_echo%.
+echo Try to run in a "Developer Command Prompt" or consult
+echo https://github.com/nodejs/node/blob/HEAD/BUILDING.md#windows
+goto exit
+
+:msbuild-found
+
+@rem Visual Studio v17.10 has a bug that causes the build to fail.
+@rem Check if the version is v17.10 and exit if it is.
+echo %VSCMD_VER% | findstr /b /c:"17.10" >nul
+if %errorlevel% neq 1 (
+  echo Node.js doesn't compile with Visual Studio 17.10 Please use a different version.
+  goto exit
+)
+
+@rem check if the clang-cl build is requested
+if not defined clang_cl goto clang-skip
+@rem x64 is hard coded as it is used for both cross and native compilation.
+set "clang_path=%VCINSTALLDIR%\Tools\Llvm\x64\bin\clang.exe"
+for /F "tokens=3" %%i in ('"%clang_path%" --version') do (
+  set clang_version=%%i
+  goto clang-found
+)
+
+:clang-not-found
+echo Failed to find Clang compiler in %clang_path%.
+goto exit
+
+:clang-found
+echo Found Clang version %clang_version%
+set configure_flags=%configure_flags% --clang-cl=%clang_version%
+
+:clang-skip
+
+set project_generated=
+:project-gen
+@rem Skip project generation if requested.
+if defined noprojgen goto msbuild
+if defined projgen goto run-configure
+if not exist node.sln goto run-configure
+if not exist .gyp_configure_stamp goto run-configure
+echo %configure_flags% > .tmp_gyp_configure_stamp
+where /R . /T *.gyp* >> .tmp_gyp_configure_stamp
+fc .gyp_configure_stamp .tmp_gyp_configure_stamp >NUL 2>&1
+if errorlevel 1 goto run-configure
+
+:skip-configure
+del .tmp_gyp_configure_stamp 2> NUL
+echo Reusing solution generated with %configure_flags%
+goto msbuild
+
+:run-configure
+del .tmp_gyp_configure_stamp 2> NUL
+del .gyp_configure_stamp 2> NUL
+@rem Generate the VS project.
+echo configure %configure_flags%
+echo %configure_flags%> .used_configure_flags
+python configure %configure_flags%
+if errorlevel 1 goto create-msvs-files-failed
+if not exist node.sln goto create-msvs-files-failed
+set project_generated=1
+echo Project files generated.
+echo %configure_flags% > .gyp_configure_stamp
+where /R . /T *.gyp* >> .gyp_configure_stamp
+
+:msbuild
+@rem Skip build if requested.
+if defined nobuild goto :after-build
+
+@rem Build the sln with msbuild.
+set "msbcpu=/m:2"
+if "%NUMBER_OF_PROCESSORS%"=="1" set "msbcpu=/m:1"
+set "msbplatform=x64"
+if "%target_arch%"=="arm64" set "msbplatform=ARM64"
+if "%target%"=="Build" (
+  if defined no_cctest set target=node
+  if "%test_args%"=="" set target=node
+  if defined cctest set target="Build"
+)
+if "%target%"=="node" if exist "%config%\cctest.exe" del "%config%\cctest.exe"
+if "%target%"=="node" if exist "%config%\embedtest.exe" del "%config%\embedtest.exe"
+if defined msbuild_args set "extra_msbuild_args=%extra_msbuild_args% %msbuild_args%"
+if defined ccache_path set "extra_msbuild_args=%extra_msbuild_args% /p:TrackFileAccess=false /p:CLToolPath=%ccache_path% /p:ForceImportAfterCppProps=%CD%\tools\msvs\props_4_ccache.props"
+@rem Setup env variables to use multiprocessor build
+set UseMultiToolTask=True
+set EnforceProcessCountAcrossBuild=True
+set MultiProcMaxCount=%NUMBER_OF_PROCESSORS%
+msbuild node.sln %msbcpu% /t:%target% /p:Configuration=%config% /p:Platform=%msbplatform% /clp:NoItemAndPropertyList;Verbosity=minimal /nolog %extra_msbuild_args%
+if errorlevel 1 (
+  if not defined project_generated echo Building Node with reused solution failed. To regenerate project files use "vcbuild projgen"
+  exit /B 1
+)
+if "%target%" == "Clean" goto exit
