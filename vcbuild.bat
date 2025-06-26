@@ -386,3 +386,42 @@ if errorlevel 1 (
   exit /B 1
 )
 if "%target%" == "Clean" goto exit
+
+:after-build
+:: Check existence of %config% before removing it.
+if exist %config% rd %config%
+if errorlevel 1 echo "Old build output exists at 'out\%config%'. Please remove." & exit /B
+:: Use /J because /D (symlink) requires special permissions.
+if EXIST out\%config% mklink /J %config% out\%config%
+if errorlevel 1 echo "Could not create junction to 'out\%config%'." & exit /B
+
+:sign
+@rem Skip signing unless the `sign` option was specified.
+if not defined sign goto licensertf
+
+call tools\sign.bat Release\node.exe
+if errorlevel 1 echo Failed to sign exe, got error code %errorlevel%&goto exit
+
+:licensertf
+@rem Skip license.rtf generation if not requested.
+if not defined licensertf goto stage_package
+
+set "use_x64_node_exe=false"
+if "%target_arch%"=="arm64" if "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "use_x64_node_exe=true"
+set "x64_node_exe=temp-vcbuild\node-x64-cross-compiling.exe"
+if "%use_x64_node_exe%"=="true" (
+  echo Cross-compilation to ARM64 detected. We'll use the x64 Node executable for license2rtf.
+  if not exist "%x64_node_exe%" (
+    echo Downloading x64 node.exe...
+    if not exist "temp-vcbuild" mkdir temp-vcbuild
+    powershell -c "Invoke-WebRequest -Uri 'https://nodejs.org/dist/latest/win-x64/node.exe' -OutFile '%x64_node_exe%'"
+  )
+  if not exist "%x64_node_exe%" (
+    echo Could not find the Node executable at the given x64_node_exe path. Aborting.
+    set exit_code=1
+    goto exit
+  )
+  %x64_node_exe% tools\license2rtf.mjs < LICENSE > %config%\license.rtf
+) else (
+  %node_exe% tools\license2rtf.mjs < LICENSE > %config%\license.rtf
+)
