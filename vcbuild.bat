@@ -425,3 +425,112 @@ if "%use_x64_node_exe%"=="true" (
 ) else (
   %node_exe% tools\license2rtf.mjs < LICENSE > %config%\license.rtf
 )
+
+if errorlevel 1 echo Failed to generate license.rtf, got error code %errorlevel%&goto exit
+
+:stage_package
+if not defined stage_package goto install-doctools
+
+echo Creating package...
+cd Release
+rmdir /S /Q %TARGET_NAME% > nul 2> nul
+mkdir %TARGET_NAME% > nul 2> nul
+mkdir %TARGET_NAME%\node_modules > nul 2> nul
+
+copy /Y node.exe %TARGET_NAME%\ > nul
+if errorlevel 1 echo Cannot copy node.exe && goto package_error
+copy /Y ..\LICENSE %TARGET_NAME%\ > nul
+if errorlevel 1 echo Cannot copy LICENSE && goto package_error
+copy /Y ..\README.md %TARGET_NAME%\ > nul
+if errorlevel 1 echo Cannot copy README.md && goto package_error
+copy /Y ..\CHANGELOG.md %TARGET_NAME%\ > nul
+if errorlevel 1 echo Cannot copy CHANGELOG.md && goto package_error
+
+if not defined nonpm (
+  robocopy ..\deps\npm %TARGET_NAME%\node_modules\npm /e /xd test nul
+  if errorlevel 8 echo Cannot copy npm package && goto package_error
+  copy /Y ..\deps\npm\bin\npm %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy npm && goto package_error
+  copy /Y ..\deps\npm\bin\npm.cmd %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy npm.md && goto package_error
+  copy /Y ..\deps\npm\bin\npx %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy npx && goto package_error
+  copy /Y ..\deps\npm\bin\npx.cmd %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy npx.cmd && goto package_error
+  copy /Y ..\deps\npm\bin\npm.ps1 %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy npm.ps1 && goto package_error
+  copy /Y ..\deps\npm\bin\npx.ps1 %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy npx.ps1 && goto package_error
+)
+
+copy /Y ..\tools\msvs\nodevars.bat %TARGET_NAME%\ > nul
+if errorlevel 1 echo Cannot copy nodevars.bat && goto package_error
+copy /Y ..\tools\msvs\install_tools\*.* %TARGET_NAME%\ > nul
+if errorlevel 1 echo Cannot copy install_tools scripts && goto package_error
+if defined dll (
+  copy /Y libnode.dll %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy libnode.dll && goto package_error
+
+  copy /Y libnode.lib %TARGET_NAME%\ > nul
+  if errorlevel 1 echo Cannot copy libnode.lib && goto package_error
+
+  mkdir %TARGET_NAME%\Release > nul
+  copy /Y node.def %TARGET_NAME%\Release\ > nul
+  if errorlevel 1 echo Cannot copy node.def && goto package_error
+
+  python ..\tools\install.py install --root-dir .. --config-gypi-path %CD%\..\config.gypi --dest-dir %CD%\%TARGET_NAME% --prefix \ --headers-only
+  if errorlevel 1 echo Cannot copy install headers && goto package_error
+
+  if exist ..\Debug (
+    mkdir %TARGET_NAME%\Debug > nul
+
+    copy /Y ..\Debug\libnode.dll %TARGET_NAME%\Debug\ > nul
+    if errorlevel 1 echo Cannot copy libnode.dll && goto package_error
+
+    copy /Y ..\Debug\libnode.lib %TARGET_NAME%\Debug\ > nul
+    if errorlevel 1 echo Cannot copy libnode.lib && goto package_error
+
+    copy /Y ..\Debug\node.def %TARGET_NAME%\Debug\ > nul
+    if errorlevel 1 echo Cannot copy node.def && goto package_error
+  )
+)
+cd ..
+
+:package
+if not defined package goto msi
+cd Release
+echo Creating %TARGET_NAME%.7z
+del %TARGET_NAME%.7z > nul 2> nul
+7z a -r -mx9 -t7z %TARGET_NAME%.7z %TARGET_NAME% > nul
+if errorlevel 1 echo Cannot create %TARGET_NAME%.7z && goto package_error
+
+echo Creating %TARGET_NAME%.zip
+del %TARGET_NAME%.zip > nul 2> nul
+7z a -r -mx9 -tzip %TARGET_NAME%.zip %TARGET_NAME% > nul
+if errorlevel 1 echo Cannot create %TARGET_NAME%.zip && goto package_error
+
+echo Creating node_pdb.7z
+del node_pdb.7z > nul 2> nul
+7z a -mx9 -t7z node_pdb.7z node.pdb > nul
+
+echo Creating node_pdb.zip
+del node_pdb_zip > nul 2> nul
+7z a -mx9 -tzip node_pdb.zip node.pdb > nul
+
+cd ..
+echo Package created!
+goto package_done
+:package_error
+cd ..
+exit /b 1
+:package_done
+
+:msi
+@rem Skip msi generation if not requested
+if not defined msi goto install-doctools
+
+:msibuild
+echo Building node-v%FULLVERSION%-%target_arch%.msi
+set "msbsdk="
+if defined WindowsSDKVersion set "msbsdk=/p:WindowsTargetPlatformVersion=%WindowsSDKVersion:~0, -1%"
+msbuild "%~dp0tools\msvs\msi\nodemsi.sln" /m /t:Restore,Clean,Build %msbsdk% /p:PlatformToolset=%PLATFORM_TOOLSET% /p:Configuration=%config% /p:Platform=%target_arch% /p:NodeVersion=%NODE_VERSION% /p:FullVersion=%FULLVERSION% /p:DistTypeDir=%DISTTYPEDIR%
