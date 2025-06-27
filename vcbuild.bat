@@ -755,3 +755,120 @@ if not exist tools\eslint\node_modules\eslint goto no-lint
 echo running lint-js-fix
 %node_exe% tools\eslint\node_modules\eslint\bin\eslint.js --cache --max-warnings=0 --report-unused-disable-directives --rule "@stylistic/js/linebreak-style: 0" eslint.config.mjs benchmark doc lib test tools --fix
 goto lint-md-build
+
+:lint-md-build
+if not defined lint_md if not defined format_md goto lint-md
+cd tools\lint-md
+%npm_exe% ci
+cd ..\..
+
+:lint-md
+if not defined lint_md goto format-md
+if not exist tools\lint-md\node_modules goto no-lint
+echo Running Markdown linter on docs...
+SETLOCAL ENABLEDELAYEDEXPANSION
+set lint_md_files=
+for /D %%D IN (doc\*) do (
+  for %%F IN (%%D\*.md) do (
+    set "lint_md_files="%%F" !lint_md_files!"
+  )
+)
+%node_exe% tools\lint-md\lint-md.js %lint_md_files%
+ENDLOCAL
+goto format-md
+
+:format-md
+if not defined format_md goto exit
+if not exist tools\lint-md\node_modules goto no-lint
+echo Running Markdown formatter on docs...
+SETLOCAL ENABLEDELAYEDEXPANSION
+set lint_md_files=
+for /D %%D IN (doc\*) do (
+  for %%F IN (%%D\*.md) do (
+    set "lint_md_files="%%F" !lint_md_files!"
+  )
+)
+%node_exe% tools\lint-md\lint-md.mjs --format %lint_md_files%
+ENDLOCAL
+
+:no-lint
+echo Linting is not available through the source tarball.
+echo Use the git repo instead: $ git clone https://github.com/nodejs/node.git
+goto exit
+
+:create-msvs-files-failed
+echo Failed to create vc project files.
+del .used_configure_flags
+set exit_code=1
+goto exit
+
+:help
+echo vcbuild.bat [debug/release] [msi] [doc] [test/test-all/test-addons/test-doc/test-js-native-api/test-node-api/test-internet/test-tick-processor/test-known-issues/test-node-inspect/test-check-deopts/test-npm/test-v8/test-v8-intl/test-v8-benchmarks/test-v8-all] [ignore-flaky] [static/dll] [noprojgen] [projgen] [clang-cl] [ccache path-to-cache] [ismall-icu/full-icu/without-intl] [nobuild] [nosnapshot] [nonpm] [ltcg] [licensetf] [sign] [x64/arm64] [vs2022] [download-all] [enable-vtune] [lint/lint-ci/lint-js/lint-md] [lint-md-build] [format-md] [package] [build-release] [upload] [no-NODE-OPTIONS] [link-module path-to-module] [debug-http2] [debug-nghttp2] [clean] [cctest] [no-cctest] [openssl-no-asm]
+echo Examples:
+echo vcbuild.bat                          : builds release build
+echo vcbuild.bat debug                    : builds debug build
+echo vcbuild.bat release msi              : builds release build and MSI installer package
+echo vcbuild.bat test                     : builds debug build and runs tests
+echo vcbuild.bat build-release            : builds the release distribution as used by nodejs.org
+echo vcbuild.bat enable-vtune             : builds Node.js with Intel VTune profiling support to profile JavaScript
+echo vcbuild.bat link-module my_module.js : bundles my_module as built-in module
+echo vcbuild.bat lint                     : runs the C++, documentation and JavaScript linter
+echo vcbuild.bat no-cctest                : skip building cctest.exe
+echo vcbuild.bat ccache c:\ccache\        : use ccache to speed build
+goto exit
+
+:exit
+if %errorlevel% neq 0 exit /b %errorlevel%
+exit /b %exit_code%
+
+
+rem ***************
+rem   Subroutines
+rem ***************
+
+:getnodeversion
+set NODE_VERSION=
+set TAG=
+set FULLVERSION=
+
+for /F "usebackq tokens=*" %%i in (`python "%~dp0tools\getnodeversion.py"`) do set NODE_VERSION=%%i
+if not defined NODE_VERSION (
+  echo Cannot determine current version of Node.js
+  exit /b 1
+)
+
+if not defined DISTTYPE set DISTTYPE=release
+if "%DISTTYPE%"=="release" (
+  set FULLVERSION=%NODE_VERSION%
+  goto distexit
+)
+if "%DISTTYPE%"=="custom" (
+  if not defined CUSTOMTAG (
+    echo "CUSTOMTAG is not set for DISTTYPE=custom"
+    exit /b 1
+  )
+  set TAG=%CUSTOMTAG%
+)
+if not "%DISTTYPE%"=="custom" (
+  if not defined DATESTRING (
+    echo "DATESTRING is not set for nightly"
+    exit /b 1
+  )
+  if not defined COMMIT (
+    echo "COMMIT is not set for nightly"
+    exit /b 1
+  )
+  if not "%DISTTYPE%"=="nightly" (
+    if not "%DISTTYPE%"=="next-nightly" (
+      echo "DISTTYPE is not release, custom, nightly or next-nightly"
+      exit /b 1
+    )
+  )
+  set TAG=%DISTTYPE%%DATESTRING%%COMMIT%
+)
+set FULLVERSION=%NODE_VERSION%-%TAG%
+
+:distexit
+if not defined DISTTYPEDIR set DISTTYPEDIR=%DISTTYPE%
+set TARGET_NAME=node-v%FULLVERSION%-win-%target_arch%
+goto :EOF
