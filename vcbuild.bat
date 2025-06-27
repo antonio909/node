@@ -533,4 +533,108 @@ if not defined msi goto install-doctools
 echo Building node-v%FULLVERSION%-%target_arch%.msi
 set "msbsdk="
 if defined WindowsSDKVersion set "msbsdk=/p:WindowsTargetPlatformVersion=%WindowsSDKVersion:~0, -1%"
-msbuild "%~dp0tools\msvs\msi\nodemsi.sln" /m /t:Restore,Clean,Build %msbsdk% /p:PlatformToolset=%PLATFORM_TOOLSET% /p:Configuration=%config% /p:Platform=%target_arch% /p:NodeVersion=%NODE_VERSION% /p:FullVersion=%FULLVERSION% /p:DistTypeDir=%DISTTYPEDIR%
+msbuild "%~dp0tools\msvs\msi\nodemsi.sln" /m /t:Restore,Clean,Build %msbsdk% /p:PlatformToolset=%PLATFORM_TOOLSET% /p:Configuration=%config% /p:Platform=%target_arch% /p:NodeVersion=%NODE_VERSION% /p:FullVersion=%FULLVERSION% /p:DistTypeDir=%DISTTYPEDIR% /clp:NoSummary;NoItemAndPropertyList;Verbosity=minimal /nologo
+if errorlevel 1 goto exit
+
+if not defined sign goto upload
+call tools\sign.bat node-v%FULLVERSION%-%target_arch%.msi
+if errorlevel 1 echo Failed to sign msi, got error code %errorlevel%&goto exit
+
+:upload
+@rem Skip upload if not requested
+if not defined upload goto install-doctools
+
+if not defined SSHCONFIG (
+  echo SSHCONFIG is not set for upload
+  exit /b 1
+)
+
+if not defined STAGINGSERVER set STAGINGSERVER=node-www
+if not defined CLOUDFLARE_BUCKET set CLOUDFLARE_BUCKET=r2:dist-staging
+ssh -F %SSHCONFIG% %STAGINGSERVER% "mkdir -p nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%
+if errorlevel 1 goto exit
+scp -F %SSHCONFIG% Release\node.exe %STAGINGSERVER%:nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node.exe
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "rclone copyto nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node.exe %CLOUDFLARE_BUCKET%/nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node.exe"
+if errorlevel 1 goto exit
+scp -F %SSHCONFIG% Release\node.lib %STAGINGSERVER%:nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node.lib
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "rclone copyto nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node.lib %CLOUDFLARE_BUCKET%/nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node.lib"
+if errorlevel 1 goto exit
+scp -F %SSHCONFIG% Release\node_pdb.zip %STAGINGSERVER%:nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node_pdb.zip
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "rclone copyto nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node_pdb.zip %CLOUDFLARE_BUCKET%/nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node_pdb.zip"
+if errorlevel 1 goto exit
+scp -F %SSHCONFIG% Release\node_pdb.7z %STAGINGSERVER%:nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node_pdb.7z
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "rclone copyto nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node_pdb.7z %CLOUDFLARE_BUCKET%/nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%/node_pdb.7z"
+if errorlevel 1 goto exit
+scp -F %SSHCONFIG% Release\%TARGET_NAME%.7z %STAGINGSERVER%:nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.7z
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "rclone copyto nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.7z %CLOUDFLARE_BUCKET%/nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.7z"
+if errorlevel 1 goto exit
+scp -F %SSHCONFIG% Release\%TARGET_NAME%.zip %STAGINGSERVER%:nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.zip
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "rclone copyto nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.zip %CLOUDFLARE_BUCKET%/nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.zip"
+if errorlevel 1 goto exit
+scp -F %SSHCONFIG% node-v%FULLVERSION%-%target_arch%.msi %STAGINGSERVER%:nodejs/%DISTTYPEDIR%/v%FULLVERSION%/
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "rclone copyto nodejs/%DISTTYPEDIR%/v%FULLVERSION%/node-v%FULLVERSION%-%target_arch%.msi %CLOUDFLARE_BUCKET%/nodejs/%DISTTYPEDIR%/v%FULLVERSION%/node-v%FULLVERSION%-%target_arch%.msi"
+if errorlevel 1 goto exit
+ssh -F %SSHCONFIG% %STAGINGSERVER% "touch nodejs/%DISTTYPEDIR%/v%FULLVERSION%/node-v%FULLVERSION%-%target_arch%.msi.done nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.zip.done nodejs/%DISTTYPEDIR%/v%FULLVERSION%/%TARGET_NAME%.7z.done nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%.done && chmod -R ug=rw-x+X,o=r+X nodejs/%DISTTYPEDIR%/v%FULLVERSION%/node-v%FULLVERSION%-%target_arch%.* nodejs/%DISTTYPEDIR%/v%FULLVERSION%/win-%target_arch%*"
+if errorlevel 1 goto exit
+
+
+:install-doctools
+REM only install if building doc OR testing doctool OR building addons
+if not defined doc if not defined build_addons (
+  echo.%test_args% | findstr doctool 1>nul
+  if errorlevel 1 goto :skip-install-doctools
+)
+if exist "tools\doc\node_modules\unified\package.json" goto skip-install-doctools
+SETLOCAL
+cd tools\doc
+%npm_exe% ci
+cd ..\..
+if errorlevel 1 goto exit
+ENDLOCAL
+:skip-install-doctools
+@rem Clear errorlevel from echo.%test_args% | findstr doctool 1>nul
+cd .
+
+:build-doc
+@rem Build documentation if requested
+if not defined doc goto run
+if not exist %node_exe% (
+  echo Failed to find node.exe
+  goto run
+)
+mkdir %config%\doc
+robocopy /e doc\api %config%\doc\api
+robocopy /e doc\api_assets %config%\doc\api\assets
+
+for %%F in (%config%\doc\api\*.md) do (
+  %node_exe% tools\doc\generate.mjs --node-version=v%FULLVERSION% %%F --output-directory=%%~dF%%~pF
+)
+
+:run
+@rem Run tests if requested.
+
+if not defined build_addons goto build-js-native-api-tests
+if not exist "%node_exe%" (
+  echo Failed to find node.exe
+  goto build-js-native-api-tests
+)
+echo Building addons
+:: clear
+for /d %%F in (test\addons\??_*) do (
+  rd /s /q %%F
+)
+:: generate
+"%node_exe%" tools\doc\addon-verify.mjs
+if %errorlevel% neq 0 exit /b %errorlevel%
+:: building addons
+setlocal
+python "%~dp0tools\build_addons.py" "%~dp0test\addons" --config %config%
+if errorlevel 1 exit /b 1
+endlocal
