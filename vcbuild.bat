@@ -638,3 +638,120 @@ setlocal
 python "%~dp0tools\build_addons.py" "%~dp0test\addons" --config %config%
 if errorlevel 1 exit /b 1
 endlocal
+
+:build-js-native-api-tests
+if not defined build_js_native_api_tests goto build-node-api-tests
+if node exist "%node_exe%" (
+  echo Failed to find node.exe
+  goto build-node-api-tests
+)
+echo Building js-native-api
+:: clear
+for /d %%F in (test\js-native-api\??_*) do (
+  rd /s /q %%F
+)
+:: building js-native-api
+setlocal
+python "%~dp0tools\build_addons.py" "%~dp0tools\js-native-api" --config %config%
+if errorlevel 1 exit /b 1
+endlocal
+goto build-node-api-tests
+
+:build-node-api-tests
+if not defined build_node_api_tests goto run-tests
+if not exist "%node_exe%" (
+  echo Failed to find node.exe
+  goto run-tests
+)
+echo Building node-api
+:: clear
+for /d %%F in (test\node-api\??_*) do (
+  rd /s /q %%F
+)
+:: building node-api
+setlocal
+python "%~dp0tools\build_addons.py" "%~dp0tools\node-api" --config %config%
+if errorlevel 1 exit /b 1
+endlocal
+goto run-tests
+
+:run-tests
+if defined test_check_deopts goto node-check-deopts
+if defined test_node_inspect goto node-test-inspect
+goto node-tests
+
+:node-check-deopts
+python tools\test.py --mode=release --check-deopts parallel sequential
+if defined test_node_inspect goto node-test-inspect
+goto node-tests
+
+:node-test-inspect
+set USE_EMBEDDED_NODE_INSPECT=1
+%node_exe% tools\test-npm-package.js --install deps\node-inspect test
+goto node-tests
+
+:node-tests
+if not defined test_npm goto no-test-npm
+set npm_test_cmd="%node_exe%" tools\test-npm-package.js --install --logfile=test-npm.tap deps\npm test-node
+echo %npm_test_cmd%
+%npm_test_cmd%
+if errorlevel 1 goto exit
+:no-test-npm
+
+if "%test_args%"=="" goto test-v8
+if "%config%"=="Debug" set test_args=--mode=debug %test_args%
+if "%config%"=="Release" set test_args=--mode=release %test_args%
+if defined no_cctest echo Skipping cctest because no-cctest was specified && goto run-test-py
+if not exist "%config%\cctest.exe" echo cctest.exe not found. Run "vcbuild test" or "vcbuild cctest" to build it. && goto run-test-py
+echo running 'cctest %cctest_args%'
+"%config%\cctest" %cctest_args%
+if %errorlevel% neq 0 set exit_code=%errorlevel%
+echo running '%node_exe% test\embedding\test-embedding.js'
+"%node_exe%" test\embedding\test-embedding.js
+if %errorlevel% neq 0 set exit_code=%errorlevel%
+:run-test-py
+echo running 'python tools\test.py %test_args%'
+python tools\test.py %test_args%
+if %errorlevel% neq 0 set exit_code=%errorlevel%
+goto test-v8
+
+:test-v8
+if not defined custom_v8_test goto lint-cpp
+call tools/test-v8.bat
+if errorlevel 1 goto exit
+goto lint-cpp
+
+:lint-cpp
+if not defined lint_cpp goto lint-js
+if defined NODEJS_MAKE goto run-make-lint
+where make > NUL 2>&1 && make -v | findstr /C:"GNU MAKE" 1> NUL
+if "%ERRORLEVEL%"=="0" set "NODEJS_MAKE=make PYTHON=python" & goto run-make-lint
+where wsl > NUL 2>&1
+if "%ERRORLEVEL%"=="0" set "NODEJS_MAKE=wsl make" & goto run-make-lint
+echo Could not find GNU Make, needed for linting C/CC+
+echo Alternatively, you can use WSL
+goto lint-js
+
+:run-make-lint
+%NODEJS_MAKE% lint-cpp
+goto lint-js-build
+
+:lint-js-build
+if not defined lint_js_build if not defined lint_js if not defined lint_js_fix goto lint-md-build
+cd tools\eslint
+%npm_exe% ci
+cd ..\..
+
+:lint-js
+if not defined lint_js goto lint-js-fix
+if not exist tools\eslint\node_modules\eslint goto no-lint
+echo running lint-js
+%node_exe% tools\eslint\node_modules\eslint\bin\eslint.js --cache --max-warnings=0 --report-unused-disable-directives --rule "@stylistic/js/linebreak-style: 0" eslint.config.mjs  benchmark doc lib test tools
+goto lint-js-fix
+
+:lint-js-fix
+if not defined lint_js_fix goto lint-md
+if not exist tools\eslint\node_modules\eslint goto no-lint
+echo running lint-js-fix
+%node_exe% tools\eslint\node_modules\eslint\bin\eslint.js --cache --max-warnings=0 --report-unused-disable-directives --rule "@stylistic/js/linebreak-style: 0" eslint.config.mjs benchmark doc lib test tools --fix
+goto lint-md-build
