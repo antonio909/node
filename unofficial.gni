@@ -214,4 +214,119 @@ template("node_gn_build") {
                  node_inspector.node_inspector_generated_sources
     }
   }
+
+executable(target_name) {
+  forward_variables_from(invoker, "*")
+
+  sources = [ "src/node_main.cc" ]
+  deps = [
+    ":libnode",
+    "//build/win:default_exe_manifest",
+  ]
+  if (node_use_node_snapshot) {
+    sources += [ "$target_gen_dir/node_snapshot.cc" ]
+    deps += [ ":run_node_mksnapshot" ]
+    if (is_clang || !is_win) {
+      cflags_cc = [
+        "-Wno-c++11-narrowing",
+        "-Wno-shadow",
+      ]
+    }
+  } else {
+    sources += [ "src/node_snapshot_stub.cc" ]
+  }
+  output_name = "node"
+
+  if (is_apple) {
+    # Default optimization on apple adds "-dead_strip" to ldflags, which would
+    # strip exported V8 and NAPI symbols, has to remove it to make native
+    # modules work.
+    # There is almost no performance penalty since we are only removing
+    # optimization on the node_main.cc.
+    configs -= [ "//build/config/compiler:default_optimization" ]
+  }
+}
+
+if (node_use_node_snapshot) {
+  if (current_toolchain == v8_snapshot_toolchain) {
+    executable("node_mksnapshot") {
+      configs += [ ":node_internal_config", ":disable_icf" ]
+      sources = [
+        "src/node_snapshot_stub.cc",
+        "tools/snapshot/node_mksnapshot.cc",
+      ]
+      deps = [ ":libnode" ]
+    }
+
+    # This config disables a link time optimization "ICF", which may merge
+    # different functions into one if the function signature and body of them are
+    # identical.
+    #
+    # ICF breaks 1:1 mappings of the external references for V8 snapshot, so we
+    # disable it while taking a V8 snapshot.
+    config("disable_icf") {
+      visibility = [ ":*" ] # Only targets in this file can depend on this.
+      if (is_win) {
+        ldflags = [ "/OPT:NOICF" ] # link.exe, but also lld-link.exe.
+      } else if (is_apple && !use_lld) {
+        ldflags = [ "-Wl,-no_deduplicate" ] # ld64.
+      } else if ((!is_apple && use_gold) || use_lld) {
+        ldflags = [ "-Wl,--icf=none" ]
+      }
+    }
+  }
+
+  action("run_node_mksnapshot") {
+    deps = [ ":node_mksnapshot($v8_snapshot_toolchain)" ]
+    script = "$node_v8_path/tools/run.py"
+    sources = []
+    data = []
+
+    mksnapshot_dir = get_label_info(":node_mksnapshot($v8_snapshot_toolchain)",
+                                    "root_out_dir")
+
+    outputs = [ "$target_gen_dir/node_snapshot.cc" ]
+    args = [
+      "./" + rebase_path(mksnapshot_dir + "/node_mksnapshot", root_build_dir),
+      rebase_path("$target_gen_dir/node_snapshot.cc", root_build_dir),
+    ]
+  }
+}
+
+action("generate_config_gypi") {
+  deps = [ "$node_v8_path:v8_generate_features_json" ]
+  script = "tools/generate_config_gypi.py"
+  outputs = [ "$target_gen_dir/config.gypi" ]
+  depfile = "$target_gen_dir/$target_name.d"
+  args = rebase_path(outputs, root_build_dir) + [
+    "--out_dir", rebase_path(root_build_dir, root_build_dir),
+    "--dep-file", rebase_path(depfile, root_build_dir),
+    "--node-gn-path", node_path,
+  ]
+}
+
+executable("node_js2c") {
+  deps = [
+    "deps/uv",
+    "$node_simdutf_path",
+  ]
+  sources = [
+    "tools/js2c.cc",
+    "tools/executable_wrapper.h",
+    "src/embedded_data.cc",
+    "src/embedded_data.h",
+  ]
+  include_dirs = [ "src" ]
+}
+
+action("run_node_js2c") {
+  script = "$node_v8_path/tools/run.py"
+  deps = [
+    ":node_js2c($host_toolchain)",
+    ":generate_config_gypi",
+  ]
+
+  node_deps_files = gypi_values.deps_files + node_builtin_shareable_builtins
+  node_library_files = exec_script("./tools/search_files.py")
+}
 }
