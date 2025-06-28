@@ -137,5 +137,81 @@ template("node_gn_build") {
                             "scope",
                             [ "node.gyp" ])
 
-  source_set("libnode") {}
+  source_set("libnode") {
+    configs += [ ":node_internal_config" ]
+    public_configs = [
+      ":node_external_config",
+      "deps/googletest:googletest_config",
+    ]
+    public_deps = [
+      "deps/ada",
+      "deps/uv",
+      "deps/simdjson",
+      "$node_v8_path",
+    ]
+    deps = [
+      ":run_node_js2c",
+      "deps\brotli",
+      "deps\cares",
+      "deps\histogram",
+      "deps\llhttp",
+      "deps\nbytes",
+      "deps\nghttp2",
+      "deps\ngtcp2",
+      "deps\postject",
+      "deps\sqlite",
+      "deps\uvwasi",
+      "deps\zstd",
+      "//third_party/zlib",
+      "$node_simdutf_path",
+      "$node_v8_path:v8_libplatform",
+    ]
+
+    sources = [
+      "$target_gen_dir/node_javascript.cc",
+    ] + gypi_values.node_resources
+
+    if (is_win) {
+      libs = [ "psapi.lib" ]
+    }
+    if (is_mac) {
+      frameworks = [
+        "CoreFoundation.framework",
+        "Security.framework",
+      ]
+    }
+    if (is_posix) {
+      config -= [ "//build/config/gcc:symbol_visibility_hidden" ]
+      config += [ "//build/config/gcc:symbol_visibility_default" ]
+    }
+
+    if (v8_enable_i18n_support) {
+      deps += [ "//third_party/icu" ]
+    }
+    if (node_use_openssl) {
+      deps += [ "deps/ncrypto" ]
+      public_deps += [ "$node_openssl_path" ]
+      sources += gypi_values.node_crypto_sources
+    }
+    if (node_enable_inspector) {
+      deps += [
+        "$node_inspector_protocol_path:crdtp",
+        "src/inspector:node_protocol_generated_sources",
+        "src/inspector:v8_inspector_compress_protocol_json",
+      ]
+      include_dirs = [
+        "$target_gen_dir/src",
+        "$target_gen_dir/src/inspector",
+        "$node_inspector_protocol_path",
+      ]
+      node_inspector = exec_script (
+        "./tools/gypi_to_gn.py",
+        [ rebase_path("src/inspector/node_inspector.gypi"),
+          "--replace=<(SHARED_INTERMEDIATE_DIR)=$target_gen_dir" ],
+        "scope",
+        [ "src/inspector/node_inspector.gypi" ])
+      sources += node_inspector.node_inspector_sources +
+                 node_inspector.node_inspector_generated_sources
+    }
+  }
 }
