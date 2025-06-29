@@ -38,7 +38,7 @@ template("node_gn_build") {
       defines += [ "HAVE_INSPECTOR=0" ]
     }
     if (node_use_node_code_cache) {
-      defines += [ "NODE_USE_NODE_CODE_CACHE=1" ]
+      defines += [ "NODE_USE_NODE_CODE_CACHE=1"]
     }
     if (v8_enable_i18n_support) {
       defines += [ "NODE_HAVE_I18N_SUPPORT=1" ]
@@ -67,7 +67,7 @@ template("node_gn_build") {
     ]
     configs = [ ":node_external_config" ]
     libs = []
-    cflags = [ "-Wno-microsof-include" ]
+    cflags = [ "-Wno-microsoft-include" ]
     cflags_cc = [
       "-Wno-deprecated-declarations",
       "-Wno-extra-semi",
@@ -126,7 +126,7 @@ template("node_gn_build") {
     }
     if (node_use_openssl) {
       defines += [
-        "NODE_OPENSSL_SYSTEM_CERT_PATH=\"$node_openssl_system_cert_path\"",
+        "NODE_OPENSSL_SYSTEM_CERT_PATH=\"$node_openssl_system_ca_path\"",
       ]
     }
   }
@@ -151,17 +151,17 @@ template("node_gn_build") {
     ]
     deps = [
       ":run_node_js2c",
-      "deps\brotli",
-      "deps\cares",
-      "deps\histogram",
-      "deps\llhttp",
-      "deps\nbytes",
-      "deps\nghttp2",
-      "deps\ngtcp2",
-      "deps\postject",
-      "deps\sqlite",
-      "deps\uvwasi",
-      "deps\zstd",
+      "deps/brotli",
+      "deps/cares",
+      "deps/histogram",
+      "deps/llhttp",
+      "deps/nbytes",
+      "deps/nghttp2",
+      "deps/ngtcp2",
+      "deps/postject",
+      "deps/sqlite",
+      "deps/uvwasi",
+      "deps/zstd",
       "//third_party/zlib",
       "$node_simdutf_path",
       "$node_v8_path:v8_libplatform",
@@ -169,7 +169,7 @@ template("node_gn_build") {
 
     sources = [
       "$target_gen_dir/node_javascript.cc",
-    ] + gypi_values.node_resources
+    ] + gypi_values.node_sources
 
     if (is_win) {
       libs = [ "psapi.lib" ]
@@ -181,8 +181,8 @@ template("node_gn_build") {
       ]
     }
     if (is_posix) {
-      config -= [ "//build/config/gcc:symbol_visibility_hidden" ]
-      config += [ "//build/config/gcc:symbol_visibility_default" ]
+      configs -= [ "//build/config/gcc:symbol_visibility_hidden" ]
+      configs += [ "//build/config/gcc:symbol_visibility_default" ]
     }
 
     if (v8_enable_i18n_support) {
@@ -204,129 +204,211 @@ template("node_gn_build") {
         "$target_gen_dir/src/inspector",
         "$node_inspector_protocol_path",
       ]
-      node_inspector = exec_script (
-        "./tools/gypi_to_gn.py",
-        [ rebase_path("src/inspector/node_inspector.gypi"),
-          "--replace=<(SHARED_INTERMEDIATE_DIR)=$target_gen_dir" ],
-        "scope",
-        [ "src/inspector/node_inspector.gypi" ])
+      node_inspector = exec_script(
+          "./tools/gypi_to_gn.py",
+          [ rebase_path("src/inspector/node_inspector.gypi"),
+            "--replace=<(SHARED_INTERMEDIATE_DIR)=$target_gen_dir" ],
+          "scope",
+          [ "src/inspector/node_inspector.gypi" ])
       sources += node_inspector.node_inspector_sources +
                  node_inspector.node_inspector_generated_sources
     }
   }
 
-executable(target_name) {
-  forward_variables_from(invoker, "*")
+  executable(target_name) {
+    forward_variables_from(invoker, "*")
 
-  sources = [ "src/node_main.cc" ]
-  deps = [
-    ":libnode",
-    "//build/win:default_exe_manifest",
-  ]
+    sources = [ "src/node_main.cc" ]
+    deps = [
+      ":libnode",
+      "//build/win:default_exe_manifest",
+    ]
+    if (node_use_node_snapshot) {
+      sources += [ "$target_gen_dir/node_snapshot.cc" ]
+      deps += [ ":run_node_mksnapshot" ]
+      if (is_clang || !is_win) {
+        cflags_cc = [
+          "-Wno-c++11-narrowing",
+          "-Wno-shadow",
+        ]
+      }
+    } else {
+      sources += [ "src/node_snapshot_stub.cc" ]
+    }
+    output_name = "node"
+
+    if (is_apple) {
+      # Default optimization on apple adds "-dead_strip" to ldflags, which would
+      # strip exported V8 and NAPI symbols, has to remove it to make native
+      # modules work.
+      # There is almost no performance penalty since we are only removing
+      # optimization on the node_main.cc.
+      configs -= [ "//build/config/compiler:default_optimization" ]
+    }
+  }
+
   if (node_use_node_snapshot) {
-    sources += [ "$target_gen_dir/node_snapshot.cc" ]
-    deps += [ ":run_node_mksnapshot" ]
-    if (is_clang || !is_win) {
-      cflags_cc = [
-        "-Wno-c++11-narrowing",
-        "-Wno-shadow",
-      ]
-    }
-  } else {
-    sources += [ "src/node_snapshot_stub.cc" ]
-  }
-  output_name = "node"
+    if (current_toolchain == v8_snapshot_toolchain) {
+      executable("node_mksnapshot") {
+        configs += [ ":node_internal_config", ":disable_icf" ]
+        sources = [
+          "src/node_snapshot_stub.cc",
+          "tools/snapshot/node_mksnapshot.cc",
+        ]
+        deps = [ ":libnode" ]
+      }
 
-  if (is_apple) {
-    # Default optimization on apple adds "-dead_strip" to ldflags, which would
-    # strip exported V8 and NAPI symbols, has to remove it to make native
-    # modules work.
-    # There is almost no performance penalty since we are only removing
-    # optimization on the node_main.cc.
-    configs -= [ "//build/config/compiler:default_optimization" ]
-  }
-}
-
-if (node_use_node_snapshot) {
-  if (current_toolchain == v8_snapshot_toolchain) {
-    executable("node_mksnapshot") {
-      configs += [ ":node_internal_config", ":disable_icf" ]
-      sources = [
-        "src/node_snapshot_stub.cc",
-        "tools/snapshot/node_mksnapshot.cc",
-      ]
-      deps = [ ":libnode" ]
-    }
-
-    # This config disables a link time optimization "ICF", which may merge
-    # different functions into one if the function signature and body of them are
-    # identical.
-    #
-    # ICF breaks 1:1 mappings of the external references for V8 snapshot, so we
-    # disable it while taking a V8 snapshot.
-    config("disable_icf") {
-      visibility = [ ":*" ] # Only targets in this file can depend on this.
-      if (is_win) {
-        ldflags = [ "/OPT:NOICF" ] # link.exe, but also lld-link.exe.
-      } else if (is_apple && !use_lld) {
-        ldflags = [ "-Wl,-no_deduplicate" ] # ld64.
-      } else if ((!is_apple && use_gold) || use_lld) {
-        ldflags = [ "-Wl,--icf=none" ]
+      # This config disables a link time optimization "ICF", which may merge
+      # different functions into one if the function signature and body of them are
+      # identical.
+      #
+      # ICF breaks 1:1 mappings of the external references for V8 snapshot, so we
+      # disable it while taking a V8 snapshot.
+      config("disable_icf") {
+        visibility = [ ":*" ]  # Only targets in this file can depend on this.
+        if (is_win) {
+          ldflags = [ "/OPT:NOICF" ]  # link.exe, but also lld-link.exe.
+        } else if (is_apple && !use_lld) {
+          ldflags = [ "-Wl,-no_deduplicate" ]  # ld64.
+        } else if ((!is_apple && use_gold) || use_lld) {
+          ldflags = [ "-Wl,--icf=none" ]
+        }
       }
     }
+
+    action("run_node_mksnapshot") {
+      deps = [ ":node_mksnapshot($v8_snapshot_toolchain)" ]
+      script = "$node_v8_path/tools/run.py"
+      sources = []
+      data = []
+
+      mksnapshot_dir = get_label_info(":node_mksnapshot($v8_snapshot_toolchain)",
+                                      "root_out_dir")
+
+      outputs = [ "$target_gen_dir/node_snapshot.cc" ]
+      args = [
+        "./" + rebase_path(mksnapshot_dir + "/node_mksnapshot", root_build_dir),
+        rebase_path("$target_gen_dir/node_snapshot.cc", root_build_dir),
+      ]
+    }
   }
 
-  action("run_node_mksnapshot") {
-    deps = [ ":node_mksnapshot($v8_snapshot_toolchain)" ]
-    script = "$node_v8_path/tools/run.py"
-    sources = []
-    data = []
-
-    mksnapshot_dir = get_label_info(":node_mksnapshot($v8_snapshot_toolchain)",
-                                    "root_out_dir")
-
-    outputs = [ "$target_gen_dir/node_snapshot.cc" ]
-    args = [
-      "./" + rebase_path(mksnapshot_dir + "/node_mksnapshot", root_build_dir),
-      rebase_path("$target_gen_dir/node_snapshot.cc", root_build_dir),
+  action("generate_config_gypi") {
+    deps = [ "$node_v8_path:v8_generate_features_json" ]
+    script = "tools/generate_config_gypi.py"
+    outputs = [ "$target_gen_dir/config.gypi" ]
+    depfile = "$target_gen_dir/$target_name.d"
+    args = rebase_path(outputs, root_build_dir) + [
+      "--out-dir", rebase_path(root_build_dir, root_build_dir),
+      "--dep-file", rebase_path(depfile, root_build_dir),
+      "--node-gn-path", node_path,
     ]
   }
-}
 
-action("generate_config_gypi") {
-  deps = [ "$node_v8_path:v8_generate_features_json" ]
-  script = "tools/generate_config_gypi.py"
-  outputs = [ "$target_gen_dir/config.gypi" ]
-  depfile = "$target_gen_dir/$target_name.d"
-  args = rebase_path(outputs, root_build_dir) + [
-    "--out_dir", rebase_path(root_build_dir, root_build_dir),
-    "--dep-file", rebase_path(depfile, root_build_dir),
-    "--node-gn-path", node_path,
-  ]
-}
+  executable("node_js2c") {
+    deps = [
+      "deps/uv",
+      "$node_simdutf_path",
+    ]
+    sources = [
+      "tools/js2c.cc",
+      "tools/executable_wrapper.h",
+      "src/embedded_data.cc",
+      "src/embedded_data.h",
+    ]
+    include_dirs = [ "src" ]
+  }
 
-executable("node_js2c") {
-  deps = [
-    "deps/uv",
-    "$node_simdutf_path",
-  ]
-  sources = [
-    "tools/js2c.cc",
-    "tools/executable_wrapper.h",
-    "src/embedded_data.cc",
-    "src/embedded_data.h",
-  ]
-  include_dirs = [ "src" ]
-}
+  action("run_node_js2c") {
+    script = "$node_v8_path/tools/run.py"
+    deps = [
+      ":node_js2c($host_toolchain)",
+      ":generate_config_gypi",
+    ]
 
-action("run_node_js2c") {
-  script = "$node_v8_path/tools/run.py"
-  deps = [
-    ":node_js2c($host_toolchain)",
-    ":generate_config_gypi",
-  ]
+    node_deps_files = gypi_values.deps_files + node_builtin_shareable_builtins
+    node_library_files = exec_script("./tools/search_files.py",
+                                     [ rebase_path(".", root_build_dir),
+                                       rebase_path("lib", root_build_dir),
+                                       "js" ],
+                                     "list lines")
 
-  node_deps_files = gypi_values.deps_files + node_builtin_shareable_builtins
-  node_library_files = exec_script("./tools/search_files.py")
-}
+    inputs = node_library_files +
+             node_deps_files +
+             [ "$target_gen_dir/config.gypi" ]
+    outputs = [ "$target_gen_dir/node_javascript.cc" ]
+
+    # Get the path to node_js2c executable of the host toolchain.
+    if (host_os == "win") {
+      host_executable_suffix = ".exe"
+    } else {
+      host_executable_suffix = ""
+    }
+    node_js2c_path =
+        get_label_info(":node_js2c($host_toolchain)", "root_out_dir") + "/" +
+        get_label_info(":node_js2c($host_toolchain)", "name") +
+        host_executable_suffix
+
+    args = [ rebase_path(node_js2c_path),
+             rebase_path("$target_gen_dir/node_javascript.cc"),
+             "--root", rebase_path("."),
+             "lib", rebase_path("$target_gen_dir/config.gypi") ] +
+           node_deps_files
+  }
+
+  executable("node_cctest") {
+    testonly = true
+    configs += [ ":node_internal_config" ]
+
+    deps = [
+      ":libnode",
+      "deps/googletest",
+      "deps/googletest:gtest_main",
+      "deps/nbytes",
+      "$node_simdutf_path",
+    ]
+
+    sources = [ "src/node_snapshot_stub.cc" ]
+    sources += exec_script("./tools/search_files.py",
+                           [ rebase_path(".", root_build_dir),
+                             rebase_path("test/cctest", root_build_dir),
+                             "cc" ],
+                           "list lines")
+
+    if (node_use_openssl) {
+      deps += [ "deps/ncrypto" ]
+    } else {
+      sources -= gypi_values.node_cctest_openssl_sources
+    }
+    if (node_enable_inspector) {
+      deps += [ "src/inspector:crdtp" ]
+      include_dirs = [
+        "$target_gen_dir/src",
+        "$target_gen_dir/src/inspector",
+      ]
+    } else {
+      sources -= gypi_values.node_cctest_inspector_sources
+    }
+  }
+
+  executable("node_embedtest") {
+    output_name = "embedtest"
+    testonly = true
+    deps = [ ":libnode" ]
+    include_dirs = [ "tools" ]
+    sources = [
+      "src/node_snapshot_stub.cc",
+      "test/embedding/embedtest.cc",
+    ]
+  }
+
+  executable("overlapped_checker") {
+    output_name = "overlapped-checker"
+    testonly = true
+    if (is_win) {
+      sources = [ "test/overlapped-checker/main_win.c" ]
+    } else {
+      sources = [ "test/overlapped-checker/main_unix.c" ]
+    }
+  }
 }
