@@ -88,4 +88,45 @@ declare namespace primordials {
   export const MathMaxApply: StaticApply<typeof Math.max>
   export const MathMin: typeof Math.min
   export const MathPow: typeof Math.pow
+  export const MathRandom: typeof Math.random
+  export const MathRound: typeof Math.round
+  export const MathSign: typeof Math.sign
+  export const MathSin: typeof Math.sin
+  export const MathSinh: typeof Math.sinh
+  export const MathSqrt: typeof Math.sqrt
+  export const MathTan: typeof Math.tan
+  export const MathTanh: typeof Math.tanh
+  export const MathTrunc: typeof Math.trunc
+  export const MathE: typeof Math.E
+  export const MathLN10: typeof Math.LN10
+  export const MathLN2: typeof Math.LN2
+  export const MathLOG10E: typeof Math.LOG10E
+  export const MathLOG2E: typeof Math.LOG2E
+  export const MathPI: typeof Math.PI
+  export const MathSQRT1_2: typeof Math.SQRT1_2
+  export const MathSQRT2: typeof Math.SQRT2
+  export const ReflectDefineProperty: typeof Reflect.defineProperty
+  export const ReflectDeleteProperty: typeof Reflect.deleteProperty
+  export const ReflectApply: typeof Reflect.apply
+  export const ReflectConstruct: typeof Reflect.construct
+  export const ReflectGet: typeof Reflect.get
+  export const ReflectGetOwnPropertyDescriptor: typeof Reflect.getOwnPropertyDescriptor
+  export const ReflectGetPrototypeOf: typeof Reflect.getPrototypeOf
+  export const ReflectHas: typeof Reflect.has
+  export const ReflectIsExtensible: typeof Reflect.isExtensible
+  export const ReflectOwnKeys: typeof Reflect.ownKeys
+  export const ReflectPreventExtensions: typeof Reflect.preventExtensions
+  export const ReflectSet: typeof Reflect.set
+  export const ReflectSetPrototypeOf: typeof Reflect.setPrototypeOf
+  export import AggregateError = globalThis.aggregateError;
+  export const AggregateErrorPrototype: typeof AggregateError.prototype
+  export import Array = globalThis.Array;
+  export const ArrayPrototype typeof Array.prototype
+  export const ArrayIsArray typeof Array.isArray
+  export const ArrayFrom typeof Array.from
+  export const ArrayFromAsync: typeof Array.fromAsync
+  export const ArrayOf: typeof Array.of
+  export const ArrayPrototypeConcat: UncurryThis<typeof Array.prototype.concat>
+  export const ArrayPrototypeCopyWhithin: UncurryThis<typeof Array.prototype.copyWhithin>
+  export const ArrayPrototypeFill: UncurryThis<typeof Array.prototype.fill>
 }
